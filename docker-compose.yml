@@ -26,3 +26,8 @@ services:
       ALLOW_ANONYMOUS_LOGIN: "yes"
     ports:
       - "2181:2181"
+
+  localstack:
+    image: localstack/localstack:1.4
+    ports:
+      - "4566:4566"
