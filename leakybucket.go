@@ -405,6 +405,7 @@ type LeakyBucketDynamoDB struct {
 	raceCheck     bool
 	latestVersion int
 	keys          map[string]types.AttributeValue
+	initialized   bool
 }
 
 // NewLeakyBucketDynamoDB creates a new LeakyBucketDynamoDB instance.
@@ -426,7 +427,7 @@ func NewLeakyBucketDynamoDB(client *dynamodb.Client, partitionKey string, tableP
 		keys[tableProps.SortKeyName] = &types.AttributeValueMemberS{Value: partitionKey}
 	}
 
-	return &LeakyBucketDynamoDB{
+	backend := &LeakyBucketDynamoDB{
 		client:       client,
 		partitionKey: partitionKey,
 		tableProps:   tableProps,
@@ -434,6 +435,8 @@ func NewLeakyBucketDynamoDB(client *dynamodb.Client, partitionKey string, tableP
 		raceCheck:    raceCheck,
 		keys:         keys,
 	}
+
+	return backend
 }
 
 // State gets the bucket's state from DynamoDB.
@@ -464,6 +467,10 @@ func (t *LeakyBucketDynamoDB) SetState(ctx context.Context, state LeakyBucketSta
 		return ctx.Err()
 	}
 
+	if err != nil {
+		t.initialized = true
+	}
+
 	return err
 }
 
@@ -488,7 +495,7 @@ func (t *LeakyBucketDynamoDB) getPutItemInputFromState(state LeakyBucketState) *
 		Item:      item,
 	}
 
-	if t.raceCheck && t.latestVersion > 0 {
+	if t.raceCheck && t.initialized {
 		input.ConditionExpression = aws.String(dynamodbBucketRaceConditionExpression)
 		input.ExpressionAttributeValues = map[string]types.AttributeValue{
 			":version": &types.AttributeValueMemberN{Value: strconv.Itoa(int(t.latestVersion))},
@@ -507,15 +514,16 @@ func (t *LeakyBucketDynamoDB) getGetItemInput() *dynamodb.GetItemInput {
 
 func (t *LeakyBucketDynamoDB) loadStateFromDynamoDB(resp *dynamodb.GetItemOutput) (LeakyBucketState, error) {
 	state := LeakyBucketState{}
+
 	err := attributevalue.Unmarshal(resp.Item[dynamoDBBucketLastKey], &state.Last)
 	if err != nil {
-		return state, fmt.Errorf("unmarshal dynamodb Last attribute failed: %w", err)
+		return LeakyBucketState{}, fmt.Errorf("unmarshal dynamodb Last attribute failed: %w", err)
 	}
 
 	if t.raceCheck {
 		err = attributevalue.Unmarshal(resp.Item[dynamoDBBucketVersionKey], &t.latestVersion)
 		if err != nil {
-			return state, fmt.Errorf("unmarshal dynamodb Version attribute failed: %w", err)
+			return LeakyBucketState{}, fmt.Errorf("unmarshal dynamodb Version attribute failed: %w", err)
 		}
 	}
 

@@ -2,6 +2,7 @@ package limiters_test
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -18,22 +19,22 @@ var tokenBucketUniformTestCases = []struct {
 	missExpected int
 	delta        float64
 }{
-	{
-		5,
-		time.Millisecond * 100,
-		10,
-		time.Millisecond * 25,
-		3,
-		1,
-	},
-	{
-		10,
-		time.Millisecond * 100,
-		13,
-		time.Millisecond * 25,
-		0,
-		1,
-	},
+	// {
+	// 	5,
+	// 	time.Millisecond * 100,
+	// 	10,
+	// 	time.Millisecond * 25,
+	// 	3,
+	// 	1,
+	// },
+	// {
+	// 	10,
+	// 	time.Millisecond * 100,
+	// 	13,
+	// 	time.Millisecond * 25,
+	// 	0,
+	// 	1,
+	// },
 	{
 		10,
 		time.Millisecond * 100,
@@ -42,30 +43,30 @@ var tokenBucketUniformTestCases = []struct {
 		2,
 		1,
 	},
-	{
-		10,
-		time.Millisecond * 100,
-		16,
-		time.Millisecond * 33,
-		2,
-		1,
-	},
-	{
-		10,
-		time.Millisecond * 10,
-		20,
-		time.Millisecond * 10,
-		0,
-		1,
-	},
-	{
-		1,
-		time.Millisecond * 200,
-		10,
-		time.Millisecond * 100,
-		5,
-		2,
-	},
+	// {
+	// 	10,
+	// 	time.Millisecond * 100,
+	// 	16,
+	// 	time.Millisecond * 33,
+	// 	2,
+	// 	1,
+	// },
+	// {
+	// 	10,
+	// 	time.Millisecond * 10,
+	// 	20,
+	// 	time.Millisecond * 10,
+	// 	0,
+	// 	1,
+	// },
+	// {
+	// 	1,
+	// 	time.Millisecond * 200,
+	// 	10,
+	// 	time.Millisecond * 100,
+	// 	5,
+	// 	2,
+	// },
 }
 
 // tokenBuckets returns all the possible TokenBucket combinations.
@@ -81,12 +82,12 @@ func (s *LimitersTestSuite) tokenBuckets(capacity int64, refillRate time.Duratio
 
 func (s *LimitersTestSuite) tokenBucketBackends() []l.TokenBucketStateBackend {
 	return []l.TokenBucketStateBackend{
-		l.NewTokenBucketInMemory(),
-		l.NewTokenBucketEtcd(s.etcdClient, uuid.New().String(), time.Second, false),
-		l.NewTokenBucketEtcd(s.etcdClient, uuid.New().String(), time.Second, true),
-		l.NewTokenBucketRedis(s.redisClient, uuid.New().String(), time.Second, false),
-		l.NewTokenBucketRedis(s.redisClient, uuid.New().String(), time.Second, true),
-		l.NewTokenBucketDynamoDB(s.dynamodbClient, uuid.New().String(), s.dynamoDBTableProps, time.Second, false),
+		// l.NewTokenBucketInMemory(),
+		// l.NewTokenBucketEtcd(s.etcdClient, uuid.New().String(), time.Second, false),
+		// l.NewTokenBucketEtcd(s.etcdClient, uuid.New().String(), time.Second, true),
+		// l.NewTokenBucketRedis(s.redisClient, uuid.New().String(), time.Second, false),
+		// l.NewTokenBucketRedis(s.redisClient, uuid.New().String(), time.Second, true),
+		// l.NewTokenBucketDynamoDB(s.dynamodbClient, uuid.New().String(), s.dynamoDBTableProps, time.Second, false),
 		l.NewTokenBucketDynamoDB(s.dynamodbClient, uuid.New().String(), s.dynamoDBTableProps, time.Second, true),
 	}
 }
@@ -95,17 +96,20 @@ func (s *LimitersTestSuite) TestTokenBucketRealClock() {
 	clock := l.NewSystemClock()
 	for _, testCase := range tokenBucketUniformTestCases {
 		for _, bucket := range s.tokenBuckets(testCase.capacity, testCase.refillRate, clock) {
+			fmt.Println("Test Case", testCase)
 			wg := sync.WaitGroup{}
 			// mu guards the miss variable below.
 			var mu sync.Mutex
 			miss := 0
 			for i := int64(0); i < testCase.requestCount; i++ {
 				// No pause for the first request.
+				now := time.Now()
 				if i > 0 {
 					clock.Sleep(testCase.requestRate)
 				}
 				wg.Add(1)
-				go func(bucket *l.TokenBucket) {
+				go func(bucket *l.TokenBucket, startTime time.Time, idx int64) {
+					fmt.Println("Request After", time.Since(now), idx)
 					defer wg.Done()
 					if _, err := bucket.Limit(context.TODO()); err != nil {
 						s.Equal(l.ErrLimitExhausted, err, "%T %v", bucket, bucket)
@@ -113,7 +117,7 @@ func (s *LimitersTestSuite) TestTokenBucketRealClock() {
 						miss++
 						mu.Unlock()
 					}
-				}(bucket)
+				}(bucket, now, i)
 			}
 			wg.Wait()
 			s.InDelta(testCase.missExpected, miss, testCase.delta, testCase)

@@ -92,7 +92,9 @@ func (t *TokenBucket) Take(ctx context.Context, tokens int64) (time.Duration, er
 	now := t.clock.Now().UnixNano()
 	// Refill the bucket.
 	tokensToAdd := (now - state.Last) / int64(t.refillRate)
+	// timeOverflow := (now - state.Last) % int64(t.refillRate)
 	if tokensToAdd > 0 {
+		fmt.Println("Adding Tokens", tokensToAdd)
 		state.Last = now
 		if tokensToAdd+state.Available <= t.capacity {
 			state.Available += tokensToAdd
@@ -479,6 +481,7 @@ type TokenBucketDynamoDB struct {
 	raceCheck     bool
 	latestVersion int
 	keys          map[string]types.AttributeValue
+	initialized   bool
 }
 
 // NewTokenBucketDynamoDB creates a new TokenBucketDynamoDB instance.
@@ -538,6 +541,10 @@ func (t *TokenBucketDynamoDB) SetState(ctx context.Context, state TokenBucketSta
 		return ctx.Err()
 	}
 
+	if err != nil {
+		t.initialized = true
+	}
+
 	return err
 }
 
@@ -566,7 +573,7 @@ func (t *TokenBucketDynamoDB) getPutItemInputFromState(state TokenBucketState) *
 		Item:      item,
 	}
 
-	if t.raceCheck && t.latestVersion > 0 {
+	if t.raceCheck && t.initialized {
 		input.ConditionExpression = aws.String(dynamodbBucketRaceConditionExpression)
 		input.ExpressionAttributeValues = map[string]types.AttributeValue{
 			":version": &types.AttributeValueMemberN{Value: strconv.Itoa(int(t.latestVersion))},
@@ -581,18 +588,18 @@ func (t *TokenBucketDynamoDB) loadStateFromDynamoDB(resp *dynamodb.GetItemOutput
 
 	err := attributevalue.Unmarshal(resp.Item[dynamoDBBucketLastKey], &state.Last)
 	if err != nil {
-		return state, fmt.Errorf("unmarshal dynamodb Last attribute failed: %w", err)
+		return TokenBucketState{}, fmt.Errorf("unmarshal dynamodb Last attribute failed: %w", err)
 	}
 
 	err = attributevalue.Unmarshal(resp.Item[dynamoDBBucketAvailableKey], &state.Available)
 	if err != nil {
-		return state, errors.Wrap(err, "unmarshal of dynamodb item attribute failed")
+		return TokenBucketState{}, errors.Wrap(err, "unmarshal of dynamodb item attribute failed")
 	}
 
 	if t.raceCheck {
 		err = attributevalue.Unmarshal(resp.Item[dynamoDBBucketVersionKey], &t.latestVersion)
 		if err != nil {
-			return state, fmt.Errorf("unmarshal dynamodb Version attribute failed: %w", err)
+			return TokenBucketState{}, fmt.Errorf("unmarshal dynamodb Version attribute failed: %w", err)
 		}
 	}
 
