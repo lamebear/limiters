@@ -96,7 +96,8 @@ func (s *LimitersTestSuite) TestTokenBucketRealClock() {
 	clock := l.NewSystemClock()
 	for _, testCase := range tokenBucketUniformTestCases {
 		for _, bucket := range s.tokenBuckets(testCase.capacity, testCase.refillRate, clock) {
-			fmt.Println("Test Case", testCase)
+			fmt.Println("Changing bucket")
+			fmt.Println()
 			wg := sync.WaitGroup{}
 			// mu guards the miss variable below.
 			var mu sync.Mutex
@@ -109,7 +110,6 @@ func (s *LimitersTestSuite) TestTokenBucketRealClock() {
 				}
 				wg.Add(1)
 				go func(bucket *l.TokenBucket, startTime time.Time, idx int64) {
-					fmt.Println("Request After", time.Since(now), idx)
 					defer wg.Done()
 					if _, err := bucket.Limit(context.TODO()); err != nil {
 						s.Equal(l.ErrLimitExhausted, err, "%T %v", bucket, bucket)

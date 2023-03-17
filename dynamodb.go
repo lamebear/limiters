@@ -2,7 +2,9 @@ package limiters
 
 import (
 	"context"
+	"fmt"
 	"sync"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
@@ -131,6 +133,7 @@ func dynamoDBputItem(ctx context.Context, client *dynamodb.Client, input *dynamo
 }
 
 func dynamoDBGetItem(ctx context.Context, client *dynamodb.Client, input *dynamodb.GetItemInput) (*dynamodb.GetItemOutput, error) {
+	start := time.Now()
 	input.ConsistentRead = aws.Bool(true)
 
 	var resp *dynamodb.GetItemOutput
@@ -139,14 +142,19 @@ func dynamoDBGetItem(ctx context.Context, client *dynamodb.Client, input *dynamo
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
+		fmt.Println("Retrieving Item", time.Since(start))
 		resp, err = client.GetItem(ctx, input)
+		fmt.Println("Retrieved Item", time.Since(start))
 	}()
 
+	fmt.Println("Waiting", time.Since(start))
 	select {
 	case <-done:
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
+
+	fmt.Println("Done Waiting", time.Since(start))
 
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to retrieve dynamodb item")

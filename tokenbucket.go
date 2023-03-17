@@ -64,6 +64,8 @@ func NewTokenBucket(capacity int64, refillRate time.Duration, locker DistLocker,
 	}
 }
 
+var last = time.Now()
+
 // Take takes tokens from the bucket.
 //
 // It returns a zero duration and a nil error if the bucket has sufficient amount of tokens.
@@ -72,34 +74,44 @@ func NewTokenBucket(capacity int64, refillRate time.Duration, locker DistLocker,
 // duration is the amount of time to wait to retry the request.
 func (t *TokenBucket) Take(ctx context.Context, tokens int64) (time.Duration, error) {
 	t.mu.Lock()
+	start := time.Now()
+	defer func() {
+		fmt.Println("Take", time.Since(start))
+	}()
 	defer t.mu.Unlock()
 	if err := t.locker.Lock(ctx); err != nil {
 		return 0, err
 	}
+	fmt.Println("====================")
 	defer func() {
 		if err := t.locker.Unlock(ctx); err != nil {
 			t.logger.Log(err)
 		}
+		fmt.Println("Unlock", time.Since(start))
 	}()
+	fmt.Println("Lock", time.Since(start))
 	state, err := t.backend.State(ctx)
 	if err != nil {
 		return 0, err
 	}
+	fmt.Println("State", time.Since(start))
 	if state.isZero() {
 		// Initially the bucket is full.
 		state.Available = t.capacity
 	}
 	now := t.clock.Now().UnixNano()
+	fmt.Println("Time Between\t", t.clock.Now().Sub(last))
+	last = t.clock.Now()
 	// Refill the bucket.
 	tokensToAdd := (now - state.Last) / int64(t.refillRate)
-	// timeOverflow := (now - state.Last) % int64(t.refillRate)
+	timeOverflow := (now - state.Last) % int64(t.refillRate)
 	if tokensToAdd > 0 {
-		fmt.Println("Adding Tokens", tokensToAdd)
-		state.Last = now
-		if tokensToAdd+state.Available <= t.capacity {
+		if tokensToAdd+state.Available < t.capacity {
 			state.Available += tokensToAdd
+			state.Last = now - timeOverflow
 		} else {
 			state.Available = t.capacity
+			state.Last = now
 		}
 	}
 
@@ -108,9 +120,11 @@ func (t *TokenBucket) Take(ctx context.Context, tokens int64) (time.Duration, er
 	}
 	// Take the tokens from the bucket.
 	state.Available -= tokens
+	fmt.Println("Maths", time.Since(start))
 	if err = t.backend.SetState(ctx, state); err != nil {
 		return 0, err
 	}
+	fmt.Println("Set State", time.Since(start))
 	return 0, nil
 }
 
@@ -515,7 +529,9 @@ func NewTokenBucketDynamoDB(client *dynamodb.Client, partitionKey string, tableP
 
 // State gets the bucket's state from DynamoDB.
 func (t *TokenBucketDynamoDB) State(ctx context.Context) (TokenBucketState, error) {
+	start := time.Now()
 	resp, err := dynamoDBGetItem(ctx, t.client, t.getGetItemInput())
+	fmt.Println("Get Item", time.Since(start))
 
 	if err != nil {
 		return TokenBucketState{}, err
